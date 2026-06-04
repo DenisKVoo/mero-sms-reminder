@@ -1,0 +1,7 @@
+session.json
+session_b64.txt
+sent_sms.json
+debug_calendar.json
+.env
+__pycache__/
+*.pyc

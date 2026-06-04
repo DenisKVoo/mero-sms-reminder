@@ -1,0 +1,27 @@
+services:
+  - type: worker
+    name: mero-sms-reminder
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter          # $7/luna
+    envVars:
+      - key: SESSION_JSON_B64
+        sync: false        # continutul din session.json, encodat base64
+      - key: SMS_GW_USER
+        sync: false
+      - key: SMS_GW_PASS
+        sync: false
+      - key: SALON_PHONE
+        sync: false
+      - key: ALERT_PHONE
+        sync: false        # numarul tau, pentru alerta de token expirat
+      - key: CHECK_INTERVAL_MINUTES
+        value: "30"
+      - key: SESSION_FILE
+        value: /data/session.json
+      - key: LOG_FILE
+        value: /data/sent_sms.json
+    disk:
+      name: sms-log
+      mountPath: /data
+      sizeGB: 1
