@@ -1,7 +1,6 @@
 """
 Extrage programările viitoare din pro.mero.ro.
 Calea principală: request direct API cu Bearer token din session.json (rapid, fără browser).
-Fallback: Playwright cu login manual dacă tokenul a expirat.
 """
 
 import asyncio
@@ -13,14 +12,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
-try:
-    from playwright.async_api import async_playwright, Page, Response, BrowserContext
-    PLAYWRIGHT_AVAILABLE = True
-except ImportError:
-    PLAYWRIGHT_AVAILABLE = False
-
 SESSION_FILE = Path(os.environ.get("SESSION_FILE", "session.json"))
-SIGN_IN_URL = "https://pro.mero.ro/sign-in"
 CALENDAR_URL = "https://pro.mero.ro/calendar"
 API_BASE = "https://pro.mero.ro/api/v2.0"
 
@@ -171,129 +163,19 @@ def fetch_appointments_calendar(days: int = 30) -> list[dict]:
     return appointments
 
 
-# ── Fallback Playwright (doar la prima rulare sau token expirat) ─────────────
-
-class _PlaywrightScraper:
-    def __init__(self):
-        self._api_responses: list[dict] = []
-        self._all_json_urls: list[str] = []
-
-    async def _handle_response(self, response: Response):
-        url = response.url
-        if response.status == 200:
-            try:
-                if "json" in response.headers.get("content-type", ""):
-                    data = await response.json()
-                    self._all_json_urls.append(url)
-                    if any(kw in url for kw in ["appointment", "booking", "reservation", "calendar", "schedule"]):
-                        self._api_responses.append({"url": url, "data": data})
-            except Exception:
-                pass
-
-    async def fetch(self) -> list[dict]:
-        async with async_playwright() as p:
-            user_agent = (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            )
-            storage_state = SESSION_FILE if SESSION_FILE.exists() else None
-
-            # Încearcă headless cu sesiunea existentă
-            if storage_state:
-                browser = await p.chromium.launch(headless=True)
-                context = await browser.new_context(
-                    storage_state=str(storage_state), user_agent=user_agent
-                )
-                page = await context.new_page()
-                await page.goto(CALENDAR_URL, wait_until="load")
-                await page.wait_for_timeout(2000)
-                logged_in = "sign-in" not in page.url and "login" not in page.url
-                await page.close()
-
-                if logged_in:
-                    page = await context.new_page()
-                    page.on("response", self._handle_response)
-                    await page.goto(CALENDAR_URL, wait_until="load")
-                    await page.wait_for_timeout(3000)
-                    await context.storage_state(path=str(SESSION_FILE))
-                    appointments = self._parse_api_responses()
-                    await browser.close()
-                    return appointments
-                await browser.close()
-                print("[scraper] Sesiune expirată. Deschid browserul pentru re-login...")
-
-            # Login manual
-            browser = await p.chromium.launch(headless=False)
-            context = await browser.new_context(user_agent=user_agent)
-            page = await context.new_page()
-            await page.goto(SIGN_IN_URL, wait_until="domcontentloaded")
-
-            print("\n" + "=" * 55)
-            print("  Browserul s-a deschis pe pagina de login.")
-            print("  Loghează-te cu Google sau număr de telefon.")
-            print("  Când ești logat și VEZI CALENDARUL,")
-            print("  apasă ENTER aici în terminal.")
-            print("=" * 55 + "\n")
-
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, input, "Apasă ENTER după ce ești logat: ")
-
-            current_url = page.url
-            if "sign-in" in current_url or "login" in current_url:
-                print(f"[scraper] EROARE: Încă pe pagina de login. Încearcă din nou.")
-                await browser.close()
-                return []
-
-            print(f"[scraper] Login confirmat.")
-            await context.storage_state(path=str(SESSION_FILE))
-            print(f"[scraper] Sesiune salvată în {SESSION_FILE}")
-
-            page.on("response", self._handle_response)
-            await page.reload(wait_until="load")
-            await page.wait_for_timeout(3000)
-
-            appointments = self._parse_api_responses()
-            await browser.close()
-            return appointments
-
-    def _parse_api_responses(self) -> list[dict]:
-        now = datetime.now(timezone.utc)
-        appointments = []
-        for resp in self._api_responses:
-            if "calendars-entries" not in resp["url"]:
-                continue
-            appointments.extend(_parse_calendars(resp["data"].get("calendars", []), now))
-        return appointments
-
-
-async def _fetch_appointments_playwright() -> list[dict]:
-    return await _PlaywrightScraper().fetch()
-
-
-# ── Punct de intrare principal ───────────────────────────────────────────────
-
 async def get_appointments() -> list[dict]:
-    """
-    Încearcă mai întâi request direct API (rapid).
-    Dacă tokenul e expirat, face fallback la Playwright cu login manual.
-    """
+    """Returnează programările de azi și mâine."""
     try:
         appointments = fetch_appointments_direct()
         print(f"[scraper] Request direct API OK — {len(appointments)} programări.")
         return appointments
     except PermissionError:
-        print("[scraper] Token expirat — fallback la Playwright cu login manual.")
+        print("[scraper] Token expirat.")
     except FileNotFoundError:
-        print("[scraper] Nicio sesiune salvată — pornesc Playwright pentru login.")
+        print("[scraper] Nicio sesiune salvată.")
     except Exception as e:
-        print(f"[scraper] Eroare request direct ({e}) — fallback la Playwright.")
-
-    if not PLAYWRIGHT_AVAILABLE:
-        print("[scraper] Playwright nu e disponibil în acest mediu.")
-        return []
-
-    return await _fetch_appointments_playwright()
+        print(f"[scraper] Eroare: {e}")
+    return []
 
 
 def _normalize_phone(phone: str) -> str:
@@ -311,10 +193,7 @@ if __name__ == "__main__":
     try:
         print("[scraper] Încerc request direct API...")
         appts = fetch_appointments_direct()
-        print(f"\n{len(appts)} programări găsite (direct API):")
+        print(f"\n{len(appts)} programări găsite:")
         print(json.dumps(appts, indent=2, ensure_ascii=False))
     except Exception as e:
-        print(f"[scraper] Direct API eșuat ({e}), încerc Playwright...")
-        appts = asyncio.run(_fetch_appointments_playwright())
-        print(f"\n{len(appts)} programări găsite (Playwright):")
-        print(json.dumps(appts, indent=2, ensure_ascii=False))
+        print(f"[scraper] Eroare: {e}")
