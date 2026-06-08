@@ -13,7 +13,11 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
-from playwright.async_api import async_playwright, Page, Response, BrowserContext
+try:
+    from playwright.async_api import async_playwright, Page, Response, BrowserContext
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
 
 SESSION_FILE = Path(os.environ.get("SESSION_FILE", "session.json"))
 SIGN_IN_URL = "https://pro.mero.ro/sign-in"
@@ -284,6 +288,10 @@ async def get_appointments() -> list[dict]:
         print("[scraper] Nicio sesiune salvată — pornesc Playwright pentru login.")
     except Exception as e:
         print(f"[scraper] Eroare request direct ({e}) — fallback la Playwright.")
+
+    if not PLAYWRIGHT_AVAILABLE:
+        print("[scraper] Playwright nu e disponibil în acest mediu.")
+        return []
 
     return await _fetch_appointments_playwright()
 
