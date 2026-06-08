@@ -81,7 +81,7 @@ def _fetch_day_direct(token: str, date: datetime) -> list[dict]:
     return resp.json().get("calendars", [])
 
 
-def _parse_calendars(calendars: list, now: datetime) -> list[dict]:
+def _parse_calendars(calendars: list, now: datetime, include_past: bool = False) -> list[dict]:
     """Extrage programările Denis Tanase din răspunsul API."""
     appointments = []
     for calendar in calendars:
@@ -96,22 +96,27 @@ def _parse_calendars(calendars: list, now: datetime) -> list[dict]:
                 continue
             client = payload.get("client", {})
             phone = client.get("phone", "")
-            if not phone:
+            start_iso = entry.get("start", "")
+            if not start_iso:
                 continue
-            datetime_iso = entry.get("start", "")
-            if not datetime_iso:
-                continue
-            try:
-                appt_dt = datetime.fromisoformat(datetime_iso.replace("Z", "+00:00"))
-                if appt_dt <= now:
-                    continue
-            except ValueError:
-                pass
+            if not include_past:
+                try:
+                    appt_dt = datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
+                    if appt_dt <= now:
+                        continue
+                except ValueError:
+                    pass
             name = f"{client.get('firstname', '')} {client.get('lastname', '')}".strip() or "Client"
+            services = ", ".join(
+                s.get("name", "") for s in payload.get("bookedServices", []) if s.get("name")
+            )
             appointments.append({
+                "id": entry.get("_id", ""),
                 "client_name": name,
-                "phone": _normalize_phone(phone),
-                "datetime_iso": datetime_iso,
+                "phone": _normalize_phone(phone) if phone else "",
+                "datetime_iso": start_iso,
+                "end_iso": entry.get("end", ""),
+                "services": services,
             })
     return appointments
 
@@ -134,6 +139,30 @@ def fetch_appointments_direct() -> list[dict]:
     for day in [today, tomorrow]:
         calendars = _fetch_day_direct(token, day)
         appointments.extend(_parse_calendars(calendars, now))
+
+    return appointments
+
+
+def fetch_appointments_calendar(days: int = 30) -> list[dict]:
+    """
+    Fetch programări pentru următoarele `days` zile (pentru Google Calendar sync).
+    Include și programările de azi, inclusiv cele deja trecute.
+    """
+    token = _load_token()
+    if not token:
+        raise FileNotFoundError("Nu există session.json sau token lipsă")
+
+    now = datetime.now(timezone.utc)
+    appointments = []
+    seen_ids: set[str] = set()
+
+    for i in range(days):
+        day = now + timedelta(days=i)
+        calendars = _fetch_day_direct(token, day)
+        for appt in _parse_calendars(calendars, now, include_past=True):
+            if appt["id"] and appt["id"] not in seen_ids:
+                seen_ids.add(appt["id"])
+                appointments.append(appt)
 
     return appointments
 

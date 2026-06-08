@@ -5,3 +5,7 @@ debug_calendar.json
 .env
 __pycache__/
 *.pyc
+credentials.json
+token.json
+token_b64.txt
+creds_b64.txt

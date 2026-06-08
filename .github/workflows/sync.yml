@@ -1,0 +1,26 @@
+name: Mero Calendar Sync
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync
+        env:
+          GOOGLE_TOKEN_B64: ${{ secrets.GOOGLE_TOKEN_B64 }}
+          GOOGLE_CREDS_B64: ${{ secrets.GOOGLE_CREDS_B64 }}
+          SESSION_JSON_B64: ${{ secrets.SESSION_JSON_B64 }}
+        run: python sync_calendar.py
