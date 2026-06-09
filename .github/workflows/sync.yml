@@ -1,8 +1,8 @@
 name: Mero Calendar Sync
 
 on:
-  schedule:
-    - cron: '*/30 * * * *'
+  repository_dispatch:
+    types: [force-sync]
   workflow_dispatch:
 
 jobs:
