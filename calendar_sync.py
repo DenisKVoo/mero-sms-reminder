@@ -7,7 +7,7 @@ Rulări ulterioare: automat, fără browser.
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from google.auth.transport.requests import Request
@@ -55,6 +55,33 @@ def _find_existing_event(service, mero_id: str) -> str | None:
     return items[0]["id"] if items else None
 
 
+def _get_all_mero_events(service, days: int = 30) -> list[dict]:
+    """Returnează toate evenimentele din Google Calendar care au meroId (în următoarele `days` zile)."""
+    now = datetime.now(timezone.utc)
+    time_max = now + timedelta(days=days)
+
+    all_events = []
+    page_token = None
+
+    while True:
+        result = service.events().list(
+            calendarId="primary",
+            timeMin=now.isoformat(),
+            timeMax=time_max.isoformat(),
+            privateExtendedProperty=f"{MERO_ID_KEY}=*",
+            singleEvents=True,
+            maxResults=250,
+            pageToken=page_token,
+        ).execute()
+
+        all_events.extend(result.get("items", []))
+        page_token = result.get("nextPageToken")
+        if not page_token:
+            break
+
+    return all_events
+
+
 def _build_event_body(appt: dict) -> dict:
     description_parts = []
     if appt.get("phone"):
@@ -83,32 +110,57 @@ def _build_event_body(appt: dict) -> dict:
 def sync_to_calendar(appointments: list[dict]) -> dict:
     """
     Sincronizează lista de programări în Google Calendar.
-    Returnează statistici: created, skipped, updated, errors.
+    - Adaugă programările noi
+    - Șterge programările anulate (nu mai sunt în mero)
+    - Skip evenimentele existente (păstrează notițele utilizatorului)
+    Returnează statistici: created, skipped, deleted, errors.
     """
     service = _get_service()
-    stats = {"created": 0, "skipped": 0, "errors": 0}
+    stats = {"created": 0, "skipped": 0, "deleted": 0, "errors": 0}
 
+    # ID-urile active din mero
+    mero_ids_active = {appt["id"] for appt in appointments if appt.get("id")}
+
+    # Adaugă programări noi / skip existente
     for appt in appointments:
         if not appt.get("id"):
             continue
         try:
             existing_id = _find_existing_event(service, appt["id"])
-            event_body = _build_event_body(appt)
 
             if existing_id:
-                # Nu modifica evenimentele existente — userul poate adăuga notițe (ex. suma plătită)
                 stats["skipped"] += 1
                 print(f"  [calendar] Existent (skip): {appt['client_name']} — {appt['datetime_iso']}")
             else:
+                event_body = _build_event_body(appt)
                 service.events().insert(
                     calendarId="primary",
                     body=event_body,
                 ).execute()
                 stats["created"] += 1
-                print(f"  [calendar] Adăugat: {appt['client_name']} — {appt['datetime_iso']}")
+                print(f"  [calendar] Adaugat: {appt['client_name']} — {appt['datetime_iso']}")
 
         except Exception as e:
             stats["errors"] += 1
             print(f"  [calendar] EROARE pentru {appt.get('client_name')}: {e}")
+
+    # Șterge evenimentele din Calendar care nu mai sunt în mero (anulate)
+    try:
+        calendar_events = _get_all_mero_events(service, days=30)
+        for event in calendar_events:
+            mero_id = event.get("extendedProperties", {}).get("private", {}).get(MERO_ID_KEY)
+            if mero_id and mero_id not in mero_ids_active:
+                try:
+                    service.events().delete(
+                        calendarId="primary",
+                        eventId=event["id"],
+                    ).execute()
+                    stats["deleted"] += 1
+                    print(f"  [calendar] Sters (anulat): {event.get('summary')} — {event.get('start', {}).get('dateTime')}")
+                except Exception as e:
+                    stats["errors"] += 1
+                    print(f"  [calendar] EROARE stergere {event.get('summary')}: {e}")
+    except Exception as e:
+        print(f"  [calendar] EROARE la verificarea anularilor: {e}")
 
     return stats

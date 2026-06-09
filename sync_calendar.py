@@ -45,7 +45,7 @@ def main():
 
     print("[sync] Sincronizez cu Google Calendar...")
     stats = sync_to_calendar(appointments)
-    print(f"\n[sync] Gata! Adaugate: {stats['created']} | Existente: {stats['skipped']} | Erori: {stats['errors']}")
+    print(f"\n[sync] Gata! Adaugate: {stats['created']} | Existente: {stats['skipped']} | Sterse: {stats['deleted']} | Erori: {stats['errors']}")
 
 
 if __name__ == "__main__":
