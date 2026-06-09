@@ -67,14 +67,22 @@ def _fetch_day_direct(token: str, date: datetime) -> list[dict]:
         "Referer": "https://pro.mero.ro/calendar",
     }
 
-    resp = requests.get(url, headers=headers, params=params, timeout=15)
-    print(f"[scraper] API {date.strftime('%Y-%m-%d')}: HTTP {resp.status_code}")
-
-    if resp.status_code == 401:
-        raise PermissionError("Token expirat")
-    resp.raise_for_status()
-
-    return resp.json().get("calendars", [])
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=30)
+            print(f"[scraper] API {date.strftime('%Y-%m-%d')}: HTTP {resp.status_code}")
+            if resp.status_code == 401:
+                raise PermissionError("Token expirat")
+            resp.raise_for_status()
+            return resp.json().get("calendars", [])
+        except PermissionError:
+            raise
+        except Exception as e:
+            if attempt < 2:
+                print(f"[scraper] Retry {attempt + 1}/3 pentru {date.strftime('%Y-%m-%d')}: {e}")
+                import time; time.sleep(3)
+            else:
+                raise
 
 
 def _parse_calendars(calendars: list, now: datetime, include_past: bool = False) -> list[dict]:
