@@ -68,13 +68,16 @@ def _get_all_mero_events(service, days: int = 30) -> list[dict]:
             calendarId="primary",
             timeMin=now.isoformat(),
             timeMax=time_max.isoformat(),
-            privateExtendedProperty=f"{MERO_ID_KEY}=*",
             singleEvents=True,
             maxResults=250,
             pageToken=page_token,
         ).execute()
 
-        all_events.extend(result.get("items", []))
+        for event in result.get("items", []):
+            mero_id = event.get("extendedProperties", {}).get("private", {}).get(MERO_ID_KEY)
+            if mero_id:
+                all_events.append(event)
+
         page_token = result.get("nextPageToken")
         if not page_token:
             break
