@@ -132,8 +132,14 @@ def sync_to_calendar(appointments: list[dict]) -> dict:
             existing_event = _find_existing_event(service, appt["id"])
 
             if existing_event:
-                existing_start = existing_event.get("start", {}).get("dateTime", "")
-                if existing_start != appt["datetime_iso"]:
+                existing_start_raw = existing_event.get("start", {}).get("dateTime", "")
+                try:
+                    existing_dt = datetime.fromisoformat(existing_start_raw).astimezone(timezone.utc)
+                    mero_dt = datetime.fromisoformat(appt["datetime_iso"].replace("Z", "+00:00")).astimezone(timezone.utc)
+                    time_changed = existing_dt != mero_dt
+                except Exception:
+                    time_changed = existing_start_raw != appt["datetime_iso"]
+                if time_changed:
                     service.events().patch(
                         calendarId="primary",
                         eventId=existing_event["id"],
