@@ -43,8 +43,8 @@ def _get_service():
     return build("calendar", "v3", credentials=creds)
 
 
-def _find_existing_event(service, mero_id: str) -> str | None:
-    """Caută un eveniment existent cu meroId în extended properties. Returnează eventId sau None."""
+def _find_existing_event(service, mero_id: str) -> dict | None:
+    """Caută un eveniment existent cu meroId în extended properties. Returnează evenimentul complet sau None."""
     result = service.events().list(
         calendarId="primary",
         privateExtendedProperty=f"{MERO_ID_KEY}={mero_id}",
@@ -52,7 +52,7 @@ def _find_existing_event(service, mero_id: str) -> str | None:
         maxResults=1,
     ).execute()
     items = result.get("items", [])
-    return items[0]["id"] if items else None
+    return items[0] if items else None
 
 
 def _get_all_mero_events(service, days: int = 30) -> list[dict]:
@@ -129,11 +129,24 @@ def sync_to_calendar(appointments: list[dict]) -> dict:
         if not appt.get("id"):
             continue
         try:
-            existing_id = _find_existing_event(service, appt["id"])
+            existing_event = _find_existing_event(service, appt["id"])
 
-            if existing_id:
-                stats["skipped"] += 1
-                print(f"  [calendar] Existent (skip): {appt['client_name']} — {appt['datetime_iso']}")
+            if existing_event:
+                existing_start = existing_event.get("start", {}).get("dateTime", "")
+                if existing_start != appt["datetime_iso"]:
+                    service.events().patch(
+                        calendarId="primary",
+                        eventId=existing_event["id"],
+                        body={
+                            "start": {"dateTime": appt["datetime_iso"], "timeZone": "Europe/Bucharest"},
+                            "end": {"dateTime": appt["end_iso"], "timeZone": "Europe/Bucharest"},
+                        },
+                    ).execute()
+                    stats["updated"] = stats.get("updated", 0) + 1
+                    print(f"  [calendar] Actualizat (ora schimbata): {appt['client_name']} — {appt['datetime_iso']}")
+                else:
+                    stats["skipped"] += 1
+                    print(f"  [calendar] Existent (skip): {appt['client_name']} — {appt['datetime_iso']}")
             else:
                 event_body = _build_event_body(appt)
                 service.events().insert(
